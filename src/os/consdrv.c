@@ -8,9 +8,9 @@
 
 #define CONS_BUFFER_SIZE 24
 
-static struct consreg {
-    kz_thread_id_t id; // thread that uses console
-    int index;         // serial index
+static struct consdrv_manager {
+    kz_thread_id_t thread_id; // thread that uses console
+    int serial_idx;
 
     // 2byte padding here
 
@@ -20,107 +20,116 @@ static struct consreg {
     int recv_len;
 
     long dummy[3]; // for alignment
-} consreg[CONSDRV_DEVICE_NUM];
+} consdrv_manager[CONSDRV_DEVICE_NUM];
 
 // If called from thread, disable interruption for mutex
-static void send_char(struct consreg *cons) {
+static void send_char(struct consdrv_manager *manager) {
     int i;
-    serial_send_byte(cons->index, cons->send_buf[0]);
-    cons->send_len--;
+    serial_send_byte(manager->serial_idx, manager->send_buf[0]);
+    manager->send_len--;
 
-    for (i = 0; i < cons->send_len; i++)
-        cons->send_buf[i] = cons->send_buf[i + 1];
+    for (i = 0; i < manager->send_len; i++)
+        manager->send_buf[i] = manager->send_buf[i + 1];
 }
 
-// If called from thread, disable interruption for mutex
-static void send_string(struct consreg *cons, char *str, int len) {
+// Called from console driver thread.
+// Do not for get to disable interruption during this function called.
+static void start_send_string(struct consdrv_manager *manager, char *str, int len) {
     int i;
     for (i = 0; i < len; i++) {
         if (str[i] == '\n')
-            cons->send_buf[cons->send_len++] = '\r';
-        cons->send_buf[cons->send_len++] = str[i];
+            manager->send_buf[manager->send_len++] = '\r';
+        manager->send_buf[manager->send_len++] = str[i];
     }
     // If sending interruption disabled, not yet start sending, so start sending.
     // If sending interruption enabled, already started sending, so data in buffer will be sent step by step
     // in extension of sending interruption.
-    if (cons->send_len && !serial_intr_is_send_enable(cons->index)) {
-        serial_intr_send_enable(cons->index);
-        send_char(cons);
+    if (manager->send_len && !serial_intr_is_send_enable(manager->serial_idx)) {
+        serial_intr_send_enable(manager->serial_idx);
+        send_char(manager);
     }
 }
 
 // Called from interruption handler
 // Because of non-context-state in this function, you cannot use syscam call but service call.
-static int consdrv_intrproc(struct consreg *cons) {
+static int serintr_proc(struct consdrv_manager *manager) {
     unsigned char c;
     char *p;
 
-    if (serial_is_recv_enable(cons->index)) {
-        c = serial_recv_byte(cons->index);
+    if (serial_is_recv_enable(manager->serial_idx)) {
+        c = serial_recv_byte(manager->serial_idx);
         if (c == '\r')
             c = '\n';
 
-        send_string(cons, &c, 1); // echo back
+        start_send_string(manager, &c, 1); // echo back
 
-        if (cons->id) {
+        if (manager->thread_id) {
             if (c != '\n') {
-                cons->recv_buf[cons->recv_len++] = c;
+                manager->recv_buf[manager->recv_len++] = c;
             } else {
+                // Create a message for sending to the command handler thread
                 p = kx_kmalloc(CONS_BUFFER_SIZE);
-                memcpy(p, cons->recv_buf, cons->recv_len);
-                kx_send(MSGBOX_ID_CONSINPUT, cons->recv_len, p);
-                cons->recv_len = 0;
+                memcpy(p, manager->recv_buf, manager->recv_len);
+
+                kx_send(MSGBOX_ID_CONSINPUT, manager->recv_len, p);
+
+                // reset receive buffer
+                manager->recv_len = 0;
             }
         }
     }
 
-    if (serial_is_send_enable(cons->index)) {
-        if (!cons->id || !cons->send_len) {
-            serial_intr_send_disable(cons->index);
+    if (serial_is_send_enable(manager->serial_idx)) {
+        if (!manager->thread_id || !manager->send_len) {
+            serial_intr_send_disable(manager->serial_idx);
         } else {
-            send_char(cons);
+            send_char(manager); // second char and later are sent from here (*)
         }
     }
 
     return 0;
 }
 
-static void consdrv_intr(void) {
+// interruption handler called from `intr_handler`
+static void intr_handler_serial(void) {
     int i;
-    struct consreg *cons;
+    struct consdrv_manager *manager;
 
     for (i = 0; i < CONSDRV_DEVICE_NUM; i++) {
-        cons = &consreg[i];
+        manager = &consdrv_manager[i];
 
-        if (!cons->id) return;
+        if (!manager->thread_id) return;
 
-        if (serial_is_send_enable(cons->index) || serial_is_recv_enable(cons->index)) {
-            consdrv_intrproc(cons);
+        if (serial_is_send_enable(manager->serial_idx) || serial_is_recv_enable(manager->serial_idx)) {
+            serintr_proc(manager);
         }
     }
 }
 
 static int consdrv_init(void) {
-    memset(consreg, 0, sizeof(consreg));
+    memset(consdrv_manager, 0, sizeof(consdrv_manager));
     return 0;
 }
 
-static int consdrv_command(struct consreg *cons, kz_thread_id_t id, int index, int size, char *command) {
+static int
+handle_received_command(struct consdrv_manager *manager, kz_thread_id_t thread_id, int serial_idx, int size, char *command) {
     switch (command[0]) {
         case CONSDRV_CMD_USE:
-            cons->id = id;
-            cons->index = command[1] - '0';
-            cons->send_buf = kz_kmalloc(CONS_BUFFER_SIZE);
-            cons->recv_buf = kz_kmalloc(CONS_BUFFER_SIZE);
-            cons->send_len = 0;
-            cons->recv_len = 0;
-            serial_init(cons->index);
-            serial_intr_recv_enable(cons->index);
+            manager->thread_id = thread_id;
+            manager->serial_idx = command[1] - '0';
+            manager->send_buf = kz_kmalloc(CONS_BUFFER_SIZE);
+            manager->recv_buf = kz_kmalloc(CONS_BUFFER_SIZE);
+            manager->send_len = 0;
+            manager->recv_len = 0;
+
+            serial_init(manager->serial_idx);
+            serial_intr_recv_enable(manager->serial_idx);
+
             break;
 
         case CONSDRV_CMD_WRITE:
             INTR_DISABLE;
-            send_string(cons, command + 1, size - 1);
+            start_send_string(manager, command + 1, size - 1); // first char is sent from here (*)
             INTR_ENABLE;
             break;
 
@@ -132,18 +141,22 @@ static int consdrv_command(struct consreg *cons, kz_thread_id_t id, int index, i
 }
 
 int consdrv_main(int argc, char *argv[]) {
-    int size, index;
-    kz_thread_id_t id;
-    char *p;
+    int msg_size, serial_idx;
+    kz_thread_id_t thread_id;
+    char *msg_p;
 
     consdrv_init();
-    kz_setintr(SOFTVEC_TYPE_SERINTR, consdrv_intr);
+
+    kz_setintr(SOFTVEC_TYPE_SERIAL, intr_handler_serial);
 
     while (1) {
-        id = kz_recv(MSGBOX_ID_CONSOUTPUT, &size, &p);
-        index = p[0] - '0';
-        consdrv_command(&consreg[index], id, index, size - 1, p + 1);
-        kz_kmfree(p);
+        // Get ID of the thread that dispatched msg-output to the console
+        thread_id = kz_recv(MSGBOX_ID_CONSOUTPUT, &msg_size, &msg_p);
+
+        serial_idx = msg_p[0] - '0';
+        handle_received_command(&consdrv_manager[serial_idx], thread_id, serial_idx, msg_size - 1, msg_p + 1);
+
+        kz_kmfree(msg_p);
     }
 
     return 0;
