@@ -1,6 +1,8 @@
 # h83069f_toy_os
 Toy operating system that runs on [h8/3069f](http://akizukidenshi.com/catalog/g/gK-01271/). The implementation is based on [kozos](http://kozos.jp/kozos/) developed by [@kozossakai](https://twitter.com/kozossakai)
 
+<img src="https://github.com/sykwer/h83069f_toy_os/blob/master/images/h83069f.jpg" height="200">
+
 ## Prepare for build
 Your host computer is assumed to be MacOS. Here, `binutils` and `gcc` for H8 are installed under `/user/local/h8-elf`.
 Other needed libraries are also installed under `/user/local/*`
@@ -82,6 +84,8 @@ $ brew install lrzsz
 ### Build and write bootloader to ROM
 Switch DIP-switch to `on on off on` (ROM write mode).
 
+<img src="https://github.com/sykwer/h83069f_toy_os/blob/master/images/dip1101.png" height="150">
+
 Build and write bootloader to ROM (If the output of `ls -l /dev/cu*` is different from README,
 you need to modify Makefile of bootloader)
 ```
@@ -90,6 +94,10 @@ $ make
 $ make image
 $ make write
 ```
+
+If you success in writing to ROM, you will get messages like this.
+
+<img src="https://github.com/sykwer/h83069f_toy_os/blob/master/images/rom_write_success.png" height="100">
 
 ### Build OS
 ```
@@ -105,12 +113,16 @@ $ cd bin/os
 
 Switch DIP-switch to `on off on off` (mode five).
 
+<img src="https://github.com/sykwer/h83069f_toy_os/blob/master/images/dip1010.png" height="150">
+
 Connect by `cu` command
 ```
 cu -l /dev/cu.Repleo-PL2303-00001014
 ```
 
 Push the reset button, and you can see message output from bootloader.
+
+<img src="https://github.com/sykwer/h83069f_toy_os/blob/master/images/cu_connect.png" height="50">
 
 Type in `load` and press enter to send the command.
 
@@ -119,6 +131,10 @@ Then execute `lsx` command to send the os image
 ~+ lsx kozos
 ```
 
+<img src="https://github.com/sykwer/h83069f_toy_os/blob/master/images/load_os.png" height="100">
+
 Finally, the OS will start if you type in `run` and press enter to send the command.
+
+<img src="https://github.com/sykwer/h83069f_toy_os/blob/master/images/run_os.png" height="100">
 
 
