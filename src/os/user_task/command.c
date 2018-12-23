@@ -1,6 +1,6 @@
 #include "defines.h"
 #include "kozos.h"
-#include "consdrv.h"
+#include "../system_task/consdrv.h"
 #include "lib.h"
 
 static void send_use(int index) {

@@ -14,8 +14,8 @@ typedef int (*kz_func_t)(int argc, char *argv[]);
 typedef void (*kz_handler_t)(void);
 
 typedef enum {
-    MSGBOX_ID_CONSINPUT = 0,
-    MSGBOX_ID_CONSOUTPUT,
+    MSGBOX_ID_CONSINPUT = 0, // Serial receiving handler uses it to send chars to command thread
+    MSGBOX_ID_CONSOUTPUT, // Used to request the console driver thread to output chars to serial
     MSGBOX_ID_NUM
 } kz_msgbox_id_t;
 

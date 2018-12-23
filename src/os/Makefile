@@ -17,6 +17,8 @@ TARGET = ../../bin/os/kozos
 OBJDIR = ../../bin/os/obj
 
 SOURCES = $(wildcard *.c)
+SOURCES += $(wildcard system_task/*.c)
+SOURCES += $(wildcard user_task/*.c)
 ASMS = startup.s dispatch.s
 
 OBJS = $(addprefix $(OBJDIR)/, $(SOURCES:.c=.o))
@@ -43,6 +45,12 @@ $(OBJDIR)/asm/%.o : asm/%.s
 		$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ -c $<
 
 $(OBJDIR)/%.o : %.c
+		$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ -c $<
+
+$(OBJDIR)/system_task/%.o : system_task/$.c
+		$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ -c $<
+
+$(OBJDIR)/user_task/%.o : user_task/$.c
 		$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ -c $<
 
 .PHONY: clean
